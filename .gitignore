@@ -1,3 +1,9 @@
+# Environment
+*.env
+
+# Bundle
+asana-priority.zip
+
 # Logs
 logs
 *.log

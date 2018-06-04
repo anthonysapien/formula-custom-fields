@@ -4,11 +4,15 @@ var Bluebird = require('bluebird');
 
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
+if (process.env.NODE_ENV !== 'production') {
+  require('dotenv').load();
+}
+
 var argv = parseArgs(process.argv.slice(2));
 
-var pat = argv.pat;
+var pat = process.env.PAT;
 
-var projects = argv._;
+var projects = process.env.PROJECTS.split(",");
 
 var client = asana.Client.create({
     // asanaBaseUrl: "https://localhost.asana.com:8180/"
