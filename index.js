@@ -207,6 +207,9 @@ var monitorProjectFormulaFields = function(project_id) {
                     });
                 } else {
                     console.log("Something changed in project", project_id);
+                    event.data = event.data.filter(function(entry){
+                      return entry.type == "task";
+                    });
                     var changed_task_id_to_seen = {};
                     var changed_task_ids = event.data.map(function(each_data) {
                         return each_data.resource.id;
