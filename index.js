@@ -11,7 +11,7 @@ var pat = argv.pat;
 var projects = argv._;
 
 var client = asana.Client.create({
-    asanaBaseUrl: "https://localhost.asana.com:8180/"
+    // asanaBaseUrl: "https://localhost.asana.com:8180/"
 }).useAccessToken(pat);
 
 /**
