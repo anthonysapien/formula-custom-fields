@@ -132,14 +132,17 @@ var updateFieldsOnTask = function(task, formula_fields) {
     var new_custom_field_values_to_write_to_task = {};
     var any_new_custom_field_values_to_write = false;
     formula_fields.forEach(function(field) {
+      // console.log("Field", field);
         var formula_json = field.description.substring(1);
         var formula_object = JSON.parse(formula_json);
         var formula_value = calc(formula_object);
-        console.log("Formula value", task.name, field.name, formula_value);
+        formula_value = formula_value.toFixed(field.precision);
+        // console.log("Formula value", task.name, field.name, formula_value);
         if (!isNaN(formula_value)) {
             // TODO defend against formula fields not being numbers
             var existing_value = task_field_values_by_id[field.id].number_value;
-            if (existing_value !== formula_value) {
+            // console.log("existing value", existing_value, "formula value", formula_value);
+            if (existing_value != formula_value) {
                 new_custom_field_values_to_write_to_task[field.id] = formula_value;
                 any_new_custom_field_values_to_write = true;
             }
@@ -147,6 +150,7 @@ var updateFieldsOnTask = function(task, formula_fields) {
     });
 
     if (any_new_custom_field_values_to_write) {
+      console.log("Updating fields");
         return client.tasks.update(task.id, {custom_fields: new_custom_field_values_to_write_to_task});
     } else {
         return Bluebird.resolve();
@@ -156,7 +160,7 @@ var updateFieldsOnTask = function(task, formula_fields) {
 var formulaFieldsForProject = function(project_id) {
     return client.projects.findById(project_id, {
         // TODO name is only here for debugging
-        opt_fields: "custom_field_settings.custom_field.name,custom_field_settings.custom_field.description"
+        opt_fields: "custom_field_settings.custom_field.name,custom_field_settings.custom_field.description,custom_field_settings.custom_field.precision"
     }).then(function(project) {
         return project.custom_field_settings.map(function(cfs) {
             return cfs.custom_field;
@@ -203,14 +207,14 @@ var monitorProjectFormulaFields = function(project_id) {
                     checkOnProjectRepeatedly();
                 });
             } else {
-                console.log("Got incremental update from project", project_id, event);
+                // console.log("Got incremental update from project", project_id, event);
                 if (event.data.length === 0) {
                     // No updates, check again in a while
                     Bluebird.delay(1000).then(function() {
                         checkOnProjectRepeatedly();
                     });
                 } else {
-                    console.log("Something changed in project", project_id);
+                    console.log("Change detected in project", project_id);
                     event.data = event.data.filter(function(entry){
                       return entry.type == "task";
                     });
@@ -231,9 +235,11 @@ var monitorProjectFormulaFields = function(project_id) {
                     // but requires a separate request to load each task, so is worth keeping separate
                     formulaFieldsForProject(project_id).then(function(formula_fields) {
                         return Bluebird.all(changed_task_ids.map(function(task_id) {
-                            console.log("Recalculating formulae on task", task_id);
+                            // console.log("Recalculating formulae on task", task_id);
                             return client.tasks.findById(task_id).then(function(task) {
-                                return updateFieldsOnTask(task, formula_fields);
+                              console.log("Recalculating formulae on task", task_id, task.name);
+                              // console.log("Task", task);
+                              return updateFieldsOnTask(task, formula_fields);
                             });
                         }))
                     }).then(function() {
