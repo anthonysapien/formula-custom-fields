@@ -181,16 +181,20 @@ var monitorProjectFormulaFields = function(project_id) {
    * dealing with it.
    */
   var checkOnProjectRepeatedly = function() {
+    console.log("Requesting events for project", project_id);
     client.events.get(project_id, current_sync_token).then(function(event) {
+      console.log("Received events for project", project_id)
       current_sync_token = event.sync;
 
       if (event.errors && event.errors.length > 0) {
         // Refresh this project from scratch
         console.log("Refreshing project from scratch", project_id);
         formulaFieldsForProject(project_id).then(function(formula_fields) {
+          console.log("Requesting tasks for project", project_id);
           return client.tasks.findByProject(project_id, {
             opt_fields: "name,completed,custom_fields"
           }).then(function(tasks_collection) {
+            console.log("Received tasks for project", project_id);
             // We want to wait for all the tasks to be processed before resolving, but they
             // are streamed to us. The first promise waits for the array of individual task
             // promises to be completely full, then we wait for them all.
@@ -217,32 +221,37 @@ var monitorProjectFormulaFields = function(project_id) {
           });
         } else {
           console.log("Change detected in project", project_id);
+          console.log("Event data", event.data);
+          var deletedTaskIds = new Set();
+          var changedTaskIds = new Set();
+
+          // Filter to only tasks and not heading tasks
           event.data = event.data.filter(function(entry) {
-            return entry.type == "task";
+            return entry.type == "task" && !entry.resource.name.endsWith(":");
           });
-          var changed_task_id_to_seen = {};
-          var changed_task_ids = event.data.map(function(each_data) {
-            return each_data.resource.id;
-          }).filter(function(task_id) {
-            // De-duplication algorithm, because we don't have a Set primitive
-            if (changed_task_id_to_seen[task_id]) {
-              return false;
-            } else {
-              changed_task_id_to_seen[task_id] = true;
-              return true;
-            }
+
+          event.data.forEach(function(entry) {
+            if (entry.action == "deleted") { deletedTaskIds.add(entry.resource.id); }
+            if (entry.action == "changed") { changedTaskIds.add(entry.resource.id); }
           });
+
+          var changedNotDeletedTaskIds = [...changedTaskIds].filter(id => !deletedTaskIds.has(id));
 
           // This is kinda similar to the full-refresh version above, but has much simpler concurrency,
           // but requires a separate request to load each task, so is worth keeping separate
           formulaFieldsForProject(project_id).then(function(formula_fields) {
-            return Bluebird.all(changed_task_ids.map(function(task_id) {
+            return Bluebird.all(changedNotDeletedTaskIds.map(function(task_id) {
               // console.log("Recalculating formulae on task", task_id);
-              return client.tasks.findById(task_id).then(function(task) {
-                console.log("Recalculating formulae on task", task_id, task.name);
-                // console.log("Task", task);
-                return updateFieldsOnTask(task, formula_fields);
-              });
+              try {
+                return client.tasks.findById(task_id).then(function(task) {
+                  console.log("Recalculating formulas for task", task_id, task.name);
+                  // console.log("Task", task);
+                  return updateFieldsOnTask(task, formula_fields);
+                });
+              } catch(exception) {
+                console.log(exception);
+                return Bluebird.resolve();
+              }
             }))
           }).then(function() {
             console.log("Finished processing project", project_id);
