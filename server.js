@@ -181,20 +181,20 @@ var monitorProjectFormulaFields = function(project_id) {
    * dealing with it.
    */
   var checkOnProjectRepeatedly = function() {
-    console.log("Requesting events for project", project_id);
+    // console.log("Requesting events for project", project_id);
     client.events.get(project_id, current_sync_token).then(function(event) {
-      console.log("Received events for project", project_id)
+      // console.log("Received events for project", project_id)
       current_sync_token = event.sync;
 
       if (event.errors && event.errors.length > 0) {
         // Refresh this project from scratch
         console.log("Refreshing project from scratch", project_id);
         formulaFieldsForProject(project_id).then(function(formula_fields) {
-          console.log("Requesting tasks for project", project_id);
+          // console.log("Requesting tasks for project", project_id);
           return client.tasks.findByProject(project_id, {
             opt_fields: "name,completed,custom_fields"
           }).then(function(tasks_collection) {
-            console.log("Received tasks for project", project_id);
+            // console.log("Received tasks for project", project_id);
             // We want to wait for all the tasks to be processed before resolving, but they
             // are streamed to us. The first promise waits for the array of individual task
             // promises to be completely full, then we wait for them all.
