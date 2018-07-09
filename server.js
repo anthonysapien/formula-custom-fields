@@ -1,6 +1,6 @@
 var asana = require("asana");
 var parseArgs = require("minimist");
-var Bluebird = require('bluebird');
+// var Bluebird = require('bluebird');
 
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
@@ -155,7 +155,7 @@ var updateFieldsOnTask = function(task, formula_fields) {
       custom_fields: new_custom_field_values_to_write_to_task
     });
   } else {
-    return Bluebird.resolve();
+    return Promise.resolve();
   }
 };
 
@@ -199,12 +199,12 @@ var monitorProjectFormulaFields = function(project_id) {
             // are streamed to us. The first promise waits for the array of individual task
             // promises to be completely full, then we wait for them all.
             var task_promises = [];
-            return new Bluebird(function(streamDone) {
+            return new Promise(function(streamDone) {
               tasks_collection.stream().on("data", function(task) {
                 task_promises.push(updateFieldsOnTask(task, formula_fields));
               }).on("end", streamDone);
             }).then(function() {
-              return Bluebird.all(task_promises);
+              return Promise.all(task_promises);
             });
           });
         }).then(function() {
@@ -216,9 +216,7 @@ var monitorProjectFormulaFields = function(project_id) {
         // console.log("Got incremental update from project", project_id, event);
         if (event.data.length === 0) {
           // No updates, check again in a while
-          Bluebird.delay(1000).then(function() {
-            checkOnProjectRepeatedly();
-          });
+          new Promise(() => setTimeout(checkOnProjectRepeatedly,1000));
         } else {
           console.log("Change detected in project", project_id);
           console.log("Event data", event.data);
@@ -240,7 +238,7 @@ var monitorProjectFormulaFields = function(project_id) {
           // This is kinda similar to the full-refresh version above, but has much simpler concurrency,
           // but requires a separate request to load each task, so is worth keeping separate
           formulaFieldsForProject(project_id).then(function(formula_fields) {
-            return Bluebird.all(changedNotDeletedTaskIds.map(function(task_id) {
+            return Promise.all(changedNotDeletedTaskIds.map(function(task_id) {
               // console.log("Recalculating formulae on task", task_id);
               try {
                 return client.tasks.findById(task_id).then(function(task) {
@@ -250,7 +248,7 @@ var monitorProjectFormulaFields = function(project_id) {
                 });
               } catch(exception) {
                 console.log(exception);
-                return Bluebird.resolve();
+                return Promise.resolve();
               }
             }))
           }).then(function() {
