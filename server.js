@@ -1,6 +1,6 @@
 var asana = require("asana");
 var parseArgs = require("minimist");
-// var Bluebird = require('bluebird');
+var Bluebird = require('bluebird');
 
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
@@ -9,14 +9,17 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 var argv = parseArgs(process.argv.slice(2));
-
 var pat = process.env.PAT;
-
 var projects = process.env.PROJECTS.split(",");
-
 var client = asana.Client.create({
   // asanaBaseUrl: "https://localhost.asana.com:8180/"
 }).useAccessToken(pat);
+
+// process.on("unhandledRejection", function(reason, promise) {
+  // console.log("Unhandled Rejection at: Promise ", promise, " reason: ", reason);
+  // console.log(reason.stack);
+  // throw Error("Global promise rejection handler");
+// });
 
 /**
  * Creates a "calc" function to evaluate formulas in this task.
@@ -155,7 +158,7 @@ var updateFieldsOnTask = function(task, formula_fields) {
       custom_fields: new_custom_field_values_to_write_to_task
     });
   } else {
-    return Promise.resolve();
+    return Bluebird.resolve();
   }
 };
 
@@ -169,6 +172,9 @@ var formulaFieldsForProject = function(project_id) {
     }).filter(function(custom_field) {
       return custom_field.description.startsWith("=");
     })
+  }).catch((err) => {
+    console.log(err);
+    throw new Error("Error loading formula fields for project");
   });
 };
 
@@ -181,84 +187,105 @@ var monitorProjectFormulaFields = function(project_id) {
    * dealing with it.
    */
   var checkOnProjectRepeatedly = function() {
-    // console.log("Requesting events for project", project_id);
-    client.events.get(project_id, current_sync_token).then(function(event) {
-      // console.log("Received events for project", project_id)
-      current_sync_token = event.sync;
+    try {
+      // console.log("Checking project", project_id);
+      client.events.get(project_id, current_sync_token).then(function(event) {
+        // console.log("Received events for project", project_id)
+        current_sync_token = event.sync;
 
-      if (event.errors && event.errors.length > 0) {
-        // Refresh this project from scratch
-        console.log("Refreshing project from scratch", project_id);
-        formulaFieldsForProject(project_id).then(function(formula_fields) {
-          // console.log("Requesting tasks for project", project_id);
-          return client.tasks.findByProject(project_id, {
-            opt_fields: "name,completed,custom_fields"
-          }).then(function(tasks_collection) {
-            // console.log("Received tasks for project", project_id);
-            // We want to wait for all the tasks to be processed before resolving, but they
-            // are streamed to us. The first promise waits for the array of individual task
-            // promises to be completely full, then we wait for them all.
-            var task_promises = [];
-            return new Promise(function(streamDone) {
-              tasks_collection.stream().on("data", function(task) {
-                task_promises.push(updateFieldsOnTask(task, formula_fields));
-              }).on("end", streamDone);
-            }).then(function() {
-              return Promise.all(task_promises);
-            });
-          });
-        }).then(function() {
-          console.log("Finished processing project", project_id);
-          // Check again immediately, why not!
-          checkOnProjectRepeatedly();
-        });
-      } else {
-        // console.log("Got incremental update from project", project_id, event);
-        if (event.data.length === 0) {
-          // No updates, check again in a while
-          new Promise(() => setTimeout(checkOnProjectRepeatedly,1000));
-        } else {
-          console.log("Change detected in project", project_id);
-          console.log("Event data", event.data);
-          var deletedTaskIds = new Set();
-          var changedTaskIds = new Set();
-
-          // Filter to only tasks and not heading tasks
-          event.data = event.data.filter(function(entry) {
-            return entry.type == "task" && !entry.resource.name.endsWith(":");
-          });
-
-          event.data.forEach(function(entry) {
-            if (entry.action == "deleted") { deletedTaskIds.add(entry.resource.id); }
-            if (entry.action == "changed") { changedTaskIds.add(entry.resource.id); }
-          });
-
-          var changedNotDeletedTaskIds = [...changedTaskIds].filter(id => !deletedTaskIds.has(id));
-
-          // This is kinda similar to the full-refresh version above, but has much simpler concurrency,
-          // but requires a separate request to load each task, so is worth keeping separate
+        if (event.errors && event.errors.length > 0) {
+          // Refresh this project from scratch
+          console.log("Refreshing project from scratch", project_id);
           formulaFieldsForProject(project_id).then(function(formula_fields) {
-            return Promise.all(changedNotDeletedTaskIds.map(function(task_id) {
-              // console.log("Recalculating formulae on task", task_id);
-              try {
-                return client.tasks.findById(task_id).then(function(task) {
-                  console.log("Recalculating formulas for task", task_id, task.name);
-                  // console.log("Task", task);
-                  return updateFieldsOnTask(task, formula_fields);
-                });
-              } catch(exception) {
-                console.log(exception);
-                return Promise.resolve();
-              }
-            }))
+            // console.log("Requesting tasks for project", project_id);
+            return client.tasks.findByProject(project_id, {
+              opt_fields: "name,completed,custom_fields"
+            }).then(function(tasks_collection) {
+              // console.log("Received tasks for project", project_id);
+              // We want to wait for all the tasks to be processed before resolving, but they
+              // are streamed to us. The first promise waits for the array of individual task
+              // promises to be completely full, then we wait for them all.
+              var task_promises = [];
+              return new Bluebird(function(streamDone) {
+                tasks_collection.stream().on("data", function(task) {
+                  task_promises.push(updateFieldsOnTask(task, formula_fields));
+                }).on("end", streamDone);
+              }).then(function() {
+                return Bluebird.all(task_promises);
+              });
+            });
+          }).catch((err) => {
+            console.log(err);
+            throw new Error("Error ")
           }).then(function() {
             console.log("Finished processing project", project_id);
             // Check again immediately, why not!
             checkOnProjectRepeatedly();
+          }).catch((err) => {
+            console.log(err);
+            throw new Error("Error processing project");
           });
+        } else {
+          // console.log("Got incremental update from project", project_id, event);
+          if (!event.data) {
+            console.log("event", event);
+          }
+          if (event.data.length === 0) {
+            // No updates, check again in a while
+            Bluebird.delay(1000).then(checkOnProjectRepeatedly).catch((err) => {
+              throw new Error("Error checking project");
+            });
+          } else {
+            console.log("Change detected in project", project_id);
+            console.log("Event data", event.data);
+            var deletedTaskIds = new Set();
+            var changedTaskIds = new Set();
+
+            // Filter to only tasks and not heading tasks
+            event.data = event.data.filter(function(entry) {
+              return entry.type == "task" && !entry.resource.name.endsWith(":");
+            });
+
+            event.data.forEach(function(entry) {
+              if (entry.action == "deleted") { deletedTaskIds.add(entry.resource.id); }
+              if (entry.action == "changed") { changedTaskIds.add(entry.resource.id); }
+            });
+
+            var changedNotDeletedTaskIds = [...changedTaskIds].filter(id => !deletedTaskIds.has(id));
+
+            // This is kinda similar to the full-refresh version above, but has much simpler concurrency,
+            // but requires a separate request to load each task, so is worth keeping separate
+            formulaFieldsForProject(project_id).then(function(formula_fields) {
+              return Bluebird.all(changedNotDeletedTaskIds.map(function(task_id) {
+                // console.log("Recalculating formulae on task", task_id);
+                try {
+                  return client.tasks.findById(task_id).then(function(task) {
+                    console.log("Recalculating formulas for task", task_id, task.name);
+                    // console.log("Task", task);
+                    return updateFieldsOnTask(task, formula_fields);
+                  });
+                } catch(exception) {
+                  console.log(exception);
+                  return Bluebird.resolve();
+                }
+              }))
+            }).then(function() {
+              console.log("Finished processing project", project_id);
+              // Check again immediately, why not!
+              checkOnProjectRepeatedly();
+            });
+          }
         }
-      }
-    })
+      }).catch((err) => {
+        console.log(err);
+        console.log("Error getting events for project. Checking again in 10s");
+        // throw new Error("Error getting events for project");
+        Bluebird.delay(10000).then(checkOnProjectRepeatedly);
+      });
+    } catch (exception) {
+      console.log("*** Caught Exception ***");
+      console.log(exception);
+    }
   };
 
   checkOnProjectRepeatedly();
