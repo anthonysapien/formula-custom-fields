@@ -228,16 +228,17 @@ var monitorProjectFormulaFields = function(project_id) {
         } else {
           // console.log("Got incremental update from project", project_id, event);
           if (!event.data) {
-            console.log("event", event);
-          }
-          if (event.data.length === 0) {
+            console.log("event", event);  // typically a 501 server error
+            console.log("Error getting events for project. Checking again in 10s");
+            Bluebird.delay(10000).then(checkOnProjectRepeatedly);
+          } else if (event.data.length === 0) {
             // No updates, check again in a while
             Bluebird.delay(1000).then(checkOnProjectRepeatedly).catch((err) => {
               throw new Error("Error checking project");
             });
           } else {
             console.log("Change detected in project", project_id);
-            console.log("Event data", event.data);
+            // console.log("Event data", event.data);
             var deletedTaskIds = new Set();
             var changedTaskIds = new Set();
 
